@@ -2,3 +2,4 @@ test/**/output
 data/
 **/.DS_Store*
 .idea/
+cmd/xgen/xgen
