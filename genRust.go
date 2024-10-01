@@ -202,6 +202,8 @@ func genRustFieldCode(name string, fieldType string, plural bool, optional bool,
 			enumValidation := fmt.Sprintf("\t#[validate(enumerate = [%s])]\n", enumValues)
 			attributes += enumValidation
 		}
+	} else if !isRustBuiltInType(fieldType) {
+		attributes += "\t#[validate]\n"
 	}
 
 	fields := genRustFieldType(fieldType)
