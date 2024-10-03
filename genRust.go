@@ -109,7 +109,7 @@ func (gen *CodeGenerator) GenRust() error {
 		return err
 	}
 	defer f.Close()
-	var extern = "use serde::{Deserialize, Serialize};\nuse serde_valid::Validate;"
+	var extern = "use serde::{Deserialize, Serialize};\nuse serde_valid::Validate;\nuse utoipa::ToSchema;"
 	source := []byte(fmt.Sprintf("%s\n\n%s\n%s", copyright, extern, gen.Field))
 	f.Write(source)
 	return err
@@ -219,7 +219,7 @@ func genRustFieldCode(name string, fieldType string, plural bool, optional bool,
 }
 
 func genRustStructCode(name string, doc string, fieldContent string) string {
-	content := fmt.Sprintf("\n%s#[derive(Debug, Validate, Deserialize, Serialize, PartialEq)]\npub struct %s {\n%s}\n", genFieldComment(name, doc, "//"), name, fieldContent)
+	content := fmt.Sprintf("\n%s#[derive(Debug, Validate, ToSchema, Deserialize, Serialize, PartialEq)]\npub struct %s {\n%s}\n", genFieldComment(name, doc, "//"), name, fieldContent)
 	return content
 }
 
