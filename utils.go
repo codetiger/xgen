@@ -24,12 +24,13 @@ import (
 )
 
 var (
-	copyright = `// FedNow Message Parsing Library
+	copyright = `// Open Payment Message Parsing Library
 // https://github.com/Open-Payments/messages
 //
-// This library is designed to parse FedNow message formats based on ISO 20022 standards.
-// It handles various message types, including administrative notifications, payment status reports, 
-// customer credit transfers, and more, using Serde for efficient serialization and deserialization.
+// This library is designed to parse message formats based on the ISO 20022 standards,
+// including but not limited to FedNow messages. It supports various financial message types,
+// such as customer credit transfers, payment status reports, administrative notifications, 
+// and other ISO 20022 messages, using Serde for efficient serialization and deserialization.
 //
 // Copyright (c) 2024 Open Payments by Harishankar Narayanan
 // Licensed under the Apache License, Version 2.0 (the "License");
