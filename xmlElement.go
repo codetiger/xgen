@@ -53,7 +53,7 @@ func (opt *Options) OnElement(ele xml.StartElement, protoTree []interface{}) (er
 			if minOccurs, err = strconv.Atoi(attr.Value); attr.Value != "unbounded" && err != nil {
 				return
 			}
-			if minOccurs == 1 {
+			if minOccurs == 0 {
 				e.Optional, err = true, nil
 			}
 		}
