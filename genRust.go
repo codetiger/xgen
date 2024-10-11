@@ -210,11 +210,14 @@ func genRustFieldCode(name string, fieldType string, plural bool, optional bool,
 	if plural {
 		fields = "Vec<" + fields + ">"
 	}
+
 	if optional {
 		fields = "Option<" + fields + ">"
+		attributes += fmt.Sprintf("\t#[serde(rename = \"%s\", skip_serializing_if = \"Option::is_none\")]\n\tpub %s: %s,\n", genRustFieldRename(name), genRustFieldName(name), fields)
+	} else {
+		attributes += fmt.Sprintf("\t#[serde(rename = \"%s\")]\n\tpub %s: %s,\n", genRustFieldRename(name), genRustFieldName(name), fields)
 	}
 
-	attributes += fmt.Sprintf("\t#[serde(rename = \"%s\")]\n\tpub %s: %s,\n", genRustFieldRename(name), genRustFieldName(name), fields)
 	return attributes
 }
 
