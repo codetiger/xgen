@@ -170,7 +170,9 @@ func getBasefromSimpleType(name string, XSDSchema []interface{}) string {
 	for _, ele := range XSDSchema {
 		switch v := ele.(type) {
 		case *SimpleType:
-			if !v.List && !v.Union && v.Name == name {
+			if !v.Restriction.IsEmpty() && v.Name == name {
+				return v.Name
+			} else if !v.List && !v.Union && v.Name == name {
 				return v.Base
 			}
 		case *Attribute:

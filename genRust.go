@@ -91,6 +91,7 @@ var (
 		"virtual":  true,
 		"yield":    true,
 	}
+	commonDerives = "#[derive(Debug, Default, PartialEq, Clone, Serialize, Deserialize)]"
 )
 
 // GenRust generate Go programming language source code for XML schema
@@ -170,7 +171,7 @@ func escapeRustString(s string) string {
 	return s
 }
 
-func genRustFieldCode(name string, fieldType string, plural bool, optional bool, restriction *Restriction) string {
+func genRustFieldCode(name string, fieldType string, plural bool, optional bool, restriction *Restriction, untagged bool) string {
 	attributes := ""
 	// Only add validation attributes if there are restrictions
 	// if restriction != nil && !restriction.IsEmpty() {
@@ -211,19 +212,23 @@ func genRustFieldCode(name string, fieldType string, plural bool, optional bool,
 		fields = "Vec<" + fields + ">"
 	}
 
+	rename := genRustFieldRename(name)
+	if untagged {
+		rename = "$value"
+	}
+
 	if optional {
 		fields = "Option<" + fields + ">"
-		attributes += fmt.Sprintf("\t#[serde(rename = \"%s\", skip_serializing_if = \"Option::is_none\")]\n\tpub %s: %s,\n", genRustFieldRename(name), genRustFieldName(name), fields)
+		attributes += fmt.Sprintf("\t#[serde(rename = \"%s\", skip_serializing_if = \"Option::is_none\")]\n\tpub %s: %s,\n", rename, genRustFieldName(name), fields)
 	} else {
-		attributes += fmt.Sprintf("\t#[serde(rename = \"%s\")]\n\tpub %s: %s,\n", genRustFieldRename(name), genRustFieldName(name), fields)
+		attributes += fmt.Sprintf("\t#[serde(rename = \"%s\")]\n\tpub %s: %s,\n", rename, genRustFieldName(name), fields)
 	}
 
 	return attributes
 }
 
 func genRustStructCode(name string, doc string, fieldContent string) string {
-	content := fmt.Sprintf("\n%s#[derive(Debug, Default, PartialEq, Clone, Serialize, Deserialize)]\npub struct %s {\n%s}\n", genFieldComment(name, doc, "//"), name, fieldContent)
-	return content
+	return fmt.Sprintf("\n%s%s\npub struct %s {\n%s}\n", genFieldComment(name, doc, "//"), commonDerives, name, fieldContent)
 }
 
 // RustSimpleType generates code for simple type XML schema in Rust language
@@ -232,7 +237,7 @@ func (gen *CodeGenerator) RustSimpleType(v *SimpleType) {
 	if v.List {
 		if _, ok := gen.StructAST[v.Name]; !ok {
 			fieldType := getBasefromSimpleType(trimNSPrefix(v.Base), gen.ProtoTree)
-			content := genRustFieldCode(v.Name, fieldType, true, false, &v.Restriction)
+			content := genRustFieldCode(v.Name, fieldType, true, false, &v.Restriction, false)
 			gen.StructAST[v.Name] = content
 			gen.Field += genRustStructCode(genRustStructName(v.Name, true), v.Doc, gen.StructAST[v.Name])
 			return
@@ -248,16 +253,27 @@ func (gen *CodeGenerator) RustSimpleType(v *SimpleType) {
 				if memberType == "" { // fix order issue
 					memberType = getBasefromSimpleType(memberName, gen.ProtoTree)
 				}
-				content += genRustFieldCode(v.Name, memberType, false, false, &v.Restriction)
+				content += genRustFieldCode(v.Name, memberType, false, false, &v.Restriction, false)
 			}
 			gen.StructAST[v.Name] = content
 			gen.Field += genRustStructCode(genRustStructName(v.Name, true), "", gen.StructAST[v.Name])
 		}
 		return
 	}
+	if len(v.Restriction.Enum) > 0 && v.Base == "String" {
+		content := fmt.Sprintf("\n%s%s\npub enum %s {\n", genFieldComment(v.Name, v.Doc, "//"), commonDerives, genRustStructName(v.Name, true))
+		for _, enumValue := range v.Restriction.Enum {
+			content += fmt.Sprintf("\t#[serde(rename = \"%s\")]\n\tCode%s,\n", enumValue, strings.ToUpper(enumValue))
+		}
+		gen.StructAST[v.Name] = content
+		gen.Field += content + "\n\t#[default]\n\tUNKOWN\n}\n"
+		return
+	}
+
 	if _, ok := gen.StructAST[v.Name]; !ok {
+		// fmt.Printf("SimpleType: %s, %s, %+v\n", v.Name, v.Base, v.Restriction.Enum)
 		fieldType := getBasefromSimpleType(trimNSPrefix(v.Base), gen.ProtoTree)
-		content := genRustFieldCode(v.Name, fieldType, false, false, &v.Restriction)
+		content := genRustFieldCode(v.Name, fieldType, false, false, &v.Restriction, true)
 		gen.StructAST[v.Name] = content
 		gen.Field += genRustStructCode(genRustStructName(v.Name, true), v.Doc, gen.StructAST[v.Name])
 	}
@@ -269,24 +285,26 @@ func (gen *CodeGenerator) RustComplexType(v *ComplexType) {
 	var content string
 	for _, attrGroup := range v.AttributeGroup {
 		fieldType := getBasefromSimpleType(trimNSPrefix(attrGroup.Ref), gen.ProtoTree)
-		content += genRustFieldCode(attrGroup.Name, fieldType, false, false, nil)
+		content += genRustFieldCode(attrGroup.Name, fieldType, false, false, nil, false)
 	}
 	for _, attribute := range v.Attributes {
-		fieldType := getBasefromSimpleType(trimNSPrefix(attribute.Type), gen.ProtoTree)
-		content += genRustFieldCode(attribute.Name, fieldType, attribute.Plural, attribute.Optional, nil)
+		// fieldType := getBasefromSimpleType(trimNSPrefix(attribute.Type), gen.ProtoTree)
+		fieldType := "String"
+		// fmt.Printf("SimpleType: %+v\n", attribute)
+		content += genRustFieldCode(attribute.Name, fieldType, attribute.Plural, attribute.Optional, nil, false)
 	}
 	for _, group := range v.Groups {
 		fieldType := getBasefromSimpleType(trimNSPrefix(group.Ref), gen.ProtoTree)
-		content += genRustFieldCode(group.Name, fieldType, group.Plural, false, nil)
+		content += genRustFieldCode(group.Name, fieldType, group.Plural, false, nil, false)
 	}
 	for _, element := range v.Elements {
 		fieldType := getBasefromSimpleType(trimNSPrefix(element.Type), gen.ProtoTree)
-		content += genRustFieldCode(element.Name, fieldType, element.Plural, element.Optional, nil)
+		content += genRustFieldCode(element.Name, fieldType, element.Plural, element.Optional, nil, false)
 	}
 	if len(v.Base) > 0 {
 		fieldType := getBasefromSimpleType(trimNSPrefix(v.Base), gen.ProtoTree)
 		if isRustBuiltInType(v.Base) {
-			content += genRustFieldCode("value", fieldType, false, false, nil)
+			content += genRustFieldCode("value", fieldType, false, false, nil, false)
 		} else {
 			fieldName := genRustFieldName(fieldType)
 			// If the type is not a built-in one, add the base type as a nested field tagged with flatten
@@ -313,11 +331,11 @@ func (gen *CodeGenerator) RustGroup(v *Group) {
 		var content string
 		for _, element := range v.Elements {
 			fieldType := getBasefromSimpleType(trimNSPrefix(element.Type), gen.ProtoTree)
-			content += genRustFieldCode(element.Name, fieldType, element.Plural, element.Optional, &element.Restriction)
+			content += genRustFieldCode(element.Name, fieldType, element.Plural, element.Optional, &element.Restriction, false)
 		}
 		for _, group := range v.Groups {
 			fieldType := getBasefromSimpleType(trimNSPrefix(group.Ref), gen.ProtoTree)
-			content += genRustFieldCode(group.Name, fieldType, group.Plural, false, nil)
+			content += genRustFieldCode(group.Name, fieldType, group.Plural, false, nil, false)
 		}
 		gen.StructAST[v.Name] = content
 		gen.Field += genRustStructCode(genRustStructName(v.Name, true), v.Doc, gen.StructAST[v.Name])
@@ -331,7 +349,7 @@ func (gen *CodeGenerator) RustAttributeGroup(v *AttributeGroup) {
 		var content string
 		for _, attribute := range v.Attributes {
 			fieldType := getBasefromSimpleType(trimNSPrefix(attribute.Type), gen.ProtoTree)
-			content += genRustFieldCode(attribute.Name, fieldType, attribute.Plural, attribute.Optional, &attribute.Restriction)
+			content += genRustFieldCode(attribute.Name, fieldType, attribute.Plural, attribute.Optional, &attribute.Restriction, false)
 		}
 		gen.StructAST[v.Name] = content
 		gen.Field += genRustStructCode(genRustStructName(v.Name, true), v.Doc, gen.StructAST[v.Name])
@@ -342,7 +360,7 @@ func (gen *CodeGenerator) RustAttributeGroup(v *AttributeGroup) {
 func (gen *CodeGenerator) RustElement(v *Element) {
 	if _, ok := gen.StructAST[v.Name]; !ok {
 		fieldType := getBasefromSimpleType(trimNSPrefix(v.Type), gen.ProtoTree)
-		gen.StructAST[v.Name] = genRustFieldCode(v.Name, fieldType, v.Plural, v.Optional, &v.Restriction)
+		gen.StructAST[v.Name] = genRustFieldCode(v.Name, fieldType, v.Plural, v.Optional, &v.Restriction, false)
 		gen.Field += genRustStructCode(genRustFieldName(v.Name), v.Doc, gen.StructAST[v.Name])
 	}
 }
@@ -351,7 +369,7 @@ func (gen *CodeGenerator) RustElement(v *Element) {
 func (gen *CodeGenerator) RustAttribute(v *Attribute) {
 	if _, ok := gen.StructAST[v.Name]; !ok {
 		fieldType := getBasefromSimpleType(trimNSPrefix(v.Type), gen.ProtoTree)
-		gen.StructAST[v.Name] = genRustFieldCode(v.Name, fieldType, v.Plural, v.Optional, &v.Restriction)
+		gen.StructAST[v.Name] = genRustFieldCode(v.Name, fieldType, v.Plural, v.Optional, &v.Restriction, false)
 		gen.Field += genRustStructCode(genRustFieldName(v.Name), v.Doc, gen.StructAST[v.Name])
 	}
 }
@@ -362,7 +380,7 @@ func genRustFieldRename(name string) string {
 		return strings.Split(name, ":")[1]
 	} else {
 		if name == "value" {
-			name = "$" + name
+			name = "$value"
 		}
 		return name
 	}
