@@ -283,7 +283,7 @@ func genFieldComment(name, doc, prefix string) string {
 	if doc == "" {
 		return fmt.Sprintf("\r\n%s %s ...\r\n", prefix, name)
 	}
-	return fmt.Sprintf("\r\n%s %s is %s\r\n", prefix, name, docReplacer.Replace(doc))
+	return fmt.Sprintf("\r\n%s %s: %s\r\n", prefix, name, docReplacer.Replace(doc))
 }
 
 type kvPair struct {

@@ -91,7 +91,12 @@ var (
 		"virtual":  true,
 		"yield":    true,
 	}
-	commonDerives = "#[derive(Debug, Default, PartialEq, Clone, Serialize, Deserialize)]"
+	commonDerives = `#[cfg_attr(feature = "derive_debug", derive(Debug))]
+#[cfg_attr(feature = "derive_clone", derive(Clone))]
+#[cfg_attr(feature = "derive_partial_eq", derive(PartialEq))]
+#[cfg_attr(feature = "derive_default", derive(Default))]
+#[cfg_attr(feature = "derive_serde", derive(Serialize, Deserialize))]
+`
 )
 
 // GenRust generate Go programming language source code for XML schema
@@ -110,8 +115,13 @@ func (gen *CodeGenerator) GenRust() error {
 		return err
 	}
 	defer f.Close()
-	var extern = "use serde::{Deserialize, Serialize};\nuse regex::Regex;\nuse crate::validationerror::*;\n"
-	source := []byte(fmt.Sprintf("%s\n\n%s\n%s", copyright, extern, gen.Field))
+	var extern = "#![allow(unused_imports)]\n"
+	var imports = `
+use regex::Regex;
+use crate::common::*;
+#[cfg(feature = "derive_serde")]
+use serde::{Deserialize, Serialize};`
+	source := []byte(fmt.Sprintf("%s\n\n%s\npub mod %s {%s\n}", copyright, extern, gen.Package, strings.ReplaceAll(imports+gen.Field, "\n", "\n\t")))
 	f.Write(source)
 	return err
 }
@@ -180,49 +190,49 @@ func genRustFieldCode(name string, ftype string, plural bool, optional bool, res
 		if restriction != nil {
 			// Handle minLength
 			if restriction.hasMinLength {
-				validations += fmt.Sprintf("\t\tif self.%s.chars().count() < %d {\n", fieldName, restriction.MinLength)
-				validations += fmt.Sprintf("\t\t\treturn Err(ValidationError::new(1001, \"%s is shorter than the minimum length of %d\".to_string()));\n", fieldName, restriction.MinLength)
-				validations += "\t\t}\n"
+				validations += fmt.Sprintf("\nif self.%s.chars().count() < %d {\n", fieldName, restriction.MinLength)
+				validations += fmt.Sprintf("return Err(ValidationError::new(1001, \"%s is shorter than the minimum length of %d\".to_string()));\n", fieldName, restriction.MinLength)
+				validations += "}"
 			}
 			// Handle maxLength
 			if restriction.hasMaxLength {
-				validations += fmt.Sprintf("\t\tif self.%s.chars().count() > %d {\n", fieldName, restriction.MaxLength)
-				validations += fmt.Sprintf("\t\t\treturn Err(ValidationError::new(1002, \"%s exceeds the maximum length of %d\".to_string()));\n", fieldName, restriction.MaxLength)
-				validations += "\t\t}\n"
+				validations += fmt.Sprintf("\nif self.%s.chars().count() > %d {\n", fieldName, restriction.MaxLength)
+				validations += fmt.Sprintf("\treturn Err(ValidationError::new(1002, \"%s exceeds the maximum length of %d\".to_string()));\n", fieldName, restriction.MaxLength)
+				validations += "}"
 			}
 
 			// Handle minInclusive and maxInclusive for numeric types
 			if restriction.hasMin {
-				validations += fmt.Sprintf("\t\tif self.%s < %f {\n", fieldName, restriction.Min)
-				validations += fmt.Sprintf("\t\t\treturn Err(ValidationError::new(1003, \"%s is less than the minimum value of %f\".to_string()));\n", fieldName, restriction.Min)
-				validations += "\t\t}\n"
+				validations += fmt.Sprintf("\nif self.%s < %f {\n", fieldName, restriction.Min)
+				validations += fmt.Sprintf("\treturn Err(ValidationError::new(1003, \"%s is less than the minimum value of %f\".to_string()));\n", fieldName, restriction.Min)
+				validations += "}"
 			}
 			if restriction.hasMax {
-				validations += fmt.Sprintf("\t\tif self.%s > %f {\n", fieldName, restriction.Max)
-				validations += fmt.Sprintf("\t\t\treturn Err(ValidationError::new(1004, \"%s exceeds the maximum value of %f\".to_string()));\n", fieldName, restriction.Max)
-				validations += "\t\t}\n"
+				validations += fmt.Sprintf("\nif self.%s > %f {\n", fieldName, restriction.Max)
+				validations += fmt.Sprintf("\treturn Err(ValidationError::new(1004, \"%s exceeds the maximum value of %f\".to_string()));\n", fieldName, restriction.Max)
+				validations += "}"
 			}
 
 			// Handle pattern constraints for string types
 			if restriction.Pattern != nil && fieldType == "String" {
 				patternStr := escapeRustString(restriction.Pattern.String())
-				validations += fmt.Sprintf("\t\tlet pattern = Regex::new(\"%s\").unwrap();\n", patternStr)
-				validations += fmt.Sprintf("\t\tif !pattern.is_match(&self.%s) {\n", fieldName)
-				validations += fmt.Sprintf("\t\t\treturn Err(ValidationError::new(1005, \"%s does not match the required pattern\".to_string()));\n", fieldName)
-				validations += "\t\t}\n"
+				validations += fmt.Sprintf("\nlet pattern = Regex::new(\"%s\").unwrap();\n", patternStr)
+				validations += fmt.Sprintf("if !pattern.is_match(&self.%s) {\n", fieldName)
+				validations += fmt.Sprintf("\treturn Err(ValidationError::new(1005, \"%s does not match the required pattern\".to_string()));\n", fieldName)
+				validations += "}"
 			}
 		}
 	} else {
 		if optional {
 			if plural {
-				validations += fmt.Sprintf("\t\tif let Some(ref %[1]s_vec) = self.%[1]s { for item in %[1]s_vec { if let Err(e) = item.validate() { return Err(e); } } }\n", fieldName)
+				validations += fmt.Sprintf("\nif let Some(ref %[1]s_vec) = self.%[1]s { for item in %[1]s_vec { if let Err(e) = item.validate() { return Err(e); } } }", fieldName)
 			} else {
-				validations += fmt.Sprintf("\t\tif let Some(ref %[1]s_value) = self.%[1]s { if let Err(e) = %[1]s_value.validate() { return Err(e); } }\n", fieldName)
+				validations += fmt.Sprintf("\nif let Some(ref %[1]s_value) = self.%[1]s { if let Err(e) = %[1]s_value.validate() { return Err(e); } }", fieldName)
 			}
 		} else if plural {
-			validations += fmt.Sprintf("\t\tfor item in &self.%[1]s { if let Err(e) = item.validate() { return Err(e); } }\n", fieldName)
+			validations += fmt.Sprintf("\nfor item in &self.%[1]s { if let Err(e) = item.validate() { return Err(e); } }", fieldName)
 		} else {
-			validations += fmt.Sprintf("\t\tif let Err(e) = self.%s.validate() { return Err(e); }\n", fieldName)
+			validations += fmt.Sprintf("\nif let Err(e) = self.%s.validate() { return Err(e); }", fieldName)
 		}
 	}
 
@@ -238,9 +248,9 @@ func genRustFieldCode(name string, ftype string, plural bool, optional bool, res
 	content := ""
 	if optional {
 		fieldType = "Option<" + fieldType + ">"
-		content += fmt.Sprintf("\t#[serde(rename = \"%s\", skip_serializing_if = \"Option::is_none\")]\n\tpub %s: %s,\n", rename, genRustFieldName(name), fieldType)
+		content += fmt.Sprintf("\n#[cfg_attr( feature = \"derive_serde\", serde(rename = \"%s\", skip_serializing_if = \"Option::is_none\") )]\npub %s: %s,", rename, genRustFieldName(name), fieldType)
 	} else {
-		content += fmt.Sprintf("\t#[serde(rename = \"%s\")]\n\tpub %s: %s,\n", rename, fieldName, fieldType)
+		content += fmt.Sprintf("\n#[cfg_attr( feature = \"derive_serde\", serde(rename = \"%s\") )]\npub %s: %s,", rename, fieldName, fieldType)
 	}
 
 	return content, validations
@@ -249,16 +259,16 @@ func genRustFieldCode(name string, ftype string, plural bool, optional bool, res
 func genRustStructCode(name string, doc string, fieldContent string, validations string, untagged bool) string {
 	extraTags := ""
 	if untagged {
-		extraTags += "\n#[serde(transparent)]"
+		extraTags += "#[cfg_attr( feature = \"derive_serde\", serde(transparent) )]\n"
 	}
 
-	content := fmt.Sprintf("\n%s%s%s\npub struct %s {\n%s}\n", genFieldComment(name, doc, "//"), commonDerives, extraTags, name, fieldContent)
-	content += fmt.Sprintf("\nimpl %s {\n\tpub fn validate(&self) -> Result<(), ValidationError> {\n%s\t\tOk(())\n\t}\n}\n", name, validations)
+	content := fmt.Sprintf("\n%s%s%spub struct %s {%s\n}\n", genFieldComment(name, doc, "//"), commonDerives, extraTags, name, strings.ReplaceAll(fieldContent, "\n", "\n\t"))
+	content += fmt.Sprintf("\nimpl %s {\n\tpub fn validate(&self) -> Result<(), ValidationError> {%s\n\t\tOk(())\n\t}\n}\n", name, strings.ReplaceAll(validations, "\n", "\n\t\t"))
 	return content
 }
 
 func genRustEnumCode(name string, doc string, fieldContent string) string {
-	content := fmt.Sprintf("\n%s%s\npub enum %s {\n\t#[default]\n", doc, commonDerives, name)
+	content := fmt.Sprintf("\n%s%spub enum %s {\n\t#[cfg_attr(feature = \"derive_default\", default)]\n", doc, commonDerives, name)
 	content += fieldContent
 	content += "}\n"
 	content += fmt.Sprintf("\nimpl %s {\n\tpub fn validate(&self) -> Result<(), ValidationError> {\n\t\tOk(())\n\t}\n}\n", name)
@@ -299,7 +309,7 @@ func (gen *CodeGenerator) RustSimpleType(v *SimpleType) {
 	if len(v.Restriction.Enum) > 0 && v.Base == "String" {
 		fieldContent := ""
 		for _, enumValue := range v.Restriction.Enum {
-			fieldContent += fmt.Sprintf("\t#[serde(rename = \"%s\")]\n\tCode%s,\n", enumValue, strings.ToUpper(enumValue))
+			fieldContent += fmt.Sprintf("\t#[cfg_attr( feature = \"derive_serde\", serde(rename = \"%s\") )]\n\tCode%s,\n", enumValue, strings.ToUpper(enumValue))
 		}
 		gen.StructAST[v.Name] = fieldContent
 		enumName := genRustStructName(v.Name, true)
@@ -354,7 +364,7 @@ func (gen *CodeGenerator) RustComplexType(v *ComplexType) {
 			fmt.Printf("\n\n%s\n", fieldType)
 			fieldName := genRustFieldName(fieldType)
 			// If the type is not a built-in one, add the base type as a nested field tagged with flatten
-			content += fmt.Sprintf("\t#[serde(flatten)]\n\tpub %s: %s,\n", fieldName, fieldType)
+			content += fmt.Sprintf("\t#[cfg_attr( feature = \"derive_serde\", serde(flatten) )]\n\tpub %s: %s,\n", fieldName, fieldType)
 		}
 	}
 
