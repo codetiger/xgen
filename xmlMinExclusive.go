@@ -18,6 +18,7 @@ func (opt *Options) OnMinExclusive(ele xml.StartElement, protoTree []interface{}
 		if attr.Name.Local == "value" {
 			if opt.SimpleType.Peek() != nil {
 				opt.SimpleType.Peek().(*SimpleType).Restriction.Min, _ = strconv.ParseFloat(attr.Value, 64)
+				opt.SimpleType.Peek().(*SimpleType).Restriction.hasMin = true
 			}
 		}
 	}

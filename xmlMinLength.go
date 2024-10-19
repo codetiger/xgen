@@ -18,6 +18,7 @@ func (opt *Options) OnMinLength(ele xml.StartElement, protoTree []interface{}) (
 		if attr.Name.Local == "value" {
 			if opt.SimpleType.Peek() != nil {
 				opt.SimpleType.Peek().(*SimpleType).Restriction.MinLength, _ = strconv.Atoi(attr.Value)
+				opt.SimpleType.Peek().(*SimpleType).Restriction.hasMinLength = true
 			}
 		}
 	}

@@ -110,7 +110,7 @@ func (gen *CodeGenerator) GenRust() error {
 		return err
 	}
 	defer f.Close()
-	var extern = "use serde::{Deserialize, Serialize};\n"
+	var extern = "use serde::{Deserialize, Serialize};\nuse regex::Regex;\nuse crate::validationerror::*;\n"
 	source := []byte(fmt.Sprintf("%s\n\n%s\n%s", copyright, extern, gen.Field))
 	f.Write(source)
 	return err
@@ -170,46 +170,64 @@ func escapeRustString(s string) string {
 	s = strings.ReplaceAll(s, "\"", "\\\"")
 	return s
 }
+func genRustFieldCode(name string, ftype string, plural bool, optional bool, restriction *Restriction, untagged bool) (string, string) {
+	fieldName := genRustFieldName(name)
+	fieldType := genRustFieldType(ftype)
+	validations := ""
 
-func genRustFieldCode(name string, fieldType string, plural bool, optional bool, restriction *Restriction, untagged bool) string {
-	attributes := ""
-	// Only add validation attributes if there are restrictions
-	// if restriction != nil && !restriction.IsEmpty() {
-	// 	// Handle length constraints
-	// 	if restriction.MinLength > 0 {
-	// 		lengthValidation := fmt.Sprintf("\t#[validate(min_length = %d)]\n", restriction.MinLength)
-	// 		attributes += lengthValidation
-	// 	}
-	// 	if restriction.MaxLength > 0 {
-	// 		lengthValidation := fmt.Sprintf("\t#[validate(max_length = %d)]\n", restriction.MaxLength)
-	// 		attributes += lengthValidation
-	// 	}
+	if isRustBuiltInType(fieldType) {
+		// Only add validation attributes if there are restrictions
+		if restriction != nil {
+			// Handle minLength
+			if restriction.hasMinLength {
+				validations += fmt.Sprintf("\t\tif self.%s.chars().count() < %d {\n", fieldName, restriction.MinLength)
+				validations += fmt.Sprintf("\t\t\treturn Err(ValidationError::new(1001, \"%s is shorter than the minimum length of %d\".to_string()));\n", fieldName, restriction.MinLength)
+				validations += "\t\t}\n"
+			}
+			// Handle maxLength
+			if restriction.hasMaxLength {
+				validations += fmt.Sprintf("\t\tif self.%s.chars().count() > %d {\n", fieldName, restriction.MaxLength)
+				validations += fmt.Sprintf("\t\t\treturn Err(ValidationError::new(1002, \"%s exceeds the maximum length of %d\".to_string()));\n", fieldName, restriction.MaxLength)
+				validations += "\t\t}\n"
+			}
 
-	// 	// Handle pattern constraints
-	// 	if restriction.Pattern != nil {
-	// 		patternStr := escapeRustString(restriction.Pattern.String())
-	// 		patternValidation := fmt.Sprintf("\t#[validate(pattern = \"%s\")]\n", patternStr)
-	// 		attributes += patternValidation
-	// 	}
+			// Handle minInclusive and maxInclusive for numeric types
+			if restriction.hasMin {
+				validations += fmt.Sprintf("\t\tif self.%s < %f {\n", fieldName, restriction.Min)
+				validations += fmt.Sprintf("\t\t\treturn Err(ValidationError::new(1003, \"%s is less than the minimum value of %f\".to_string()));\n", fieldName, restriction.Min)
+				validations += "\t\t}\n"
+			}
+			if restriction.hasMax {
+				validations += fmt.Sprintf("\t\tif self.%s > %f {\n", fieldName, restriction.Max)
+				validations += fmt.Sprintf("\t\t\treturn Err(ValidationError::new(1004, \"%s exceeds the maximum value of %f\".to_string()));\n", fieldName, restriction.Max)
+				validations += "\t\t}\n"
+			}
 
-	// 	// Handle enumerations
-	// 	if len(restriction.Enum) > 0 {
-	// 		var quotedEnums []string
-	// 		for _, enumValue := range restriction.Enum {
-	// 			escapedValue := strings.ReplaceAll(enumValue, "\"", "\\\"")
-	// 			quotedEnums = append(quotedEnums, fmt.Sprintf("\"%s\"", escapedValue))
-	// 		}
-	// 		enumValues := strings.Join(quotedEnums, ", ")
-	// 		enumValidation := fmt.Sprintf("\t#[validate(enumerate = [%s])]\n", enumValues)
-	// 		attributes += enumValidation
-	// 	}
-	// } else if !isRustBuiltInType(fieldType) {
-	// 	attributes += "\t#[validate]\n"
-	// }
+			// Handle pattern constraints for string types
+			if restriction.Pattern != nil && fieldType == "String" {
+				patternStr := escapeRustString(restriction.Pattern.String())
+				validations += fmt.Sprintf("\t\tlet pattern = Regex::new(\"%s\").unwrap();\n", patternStr)
+				validations += fmt.Sprintf("\t\tif !pattern.is_match(&self.%s) {\n", fieldName)
+				validations += fmt.Sprintf("\t\t\treturn Err(ValidationError::new(1005, \"%s does not match the required pattern\".to_string()));\n", fieldName)
+				validations += "\t\t}\n"
+			}
+		}
+	} else {
+		if optional {
+			if plural {
+				validations += fmt.Sprintf("\t\tif let Some(ref %[1]s_vec) = self.%[1]s { for item in %[1]s_vec { if let Err(e) = item.validate() { return Err(e); } } }\n", fieldName)
+			} else {
+				validations += fmt.Sprintf("\t\tif let Some(ref %[1]s_value) = self.%[1]s { if let Err(e) = %[1]s_value.validate() { return Err(e); } }\n", fieldName)
+			}
+		} else if plural {
+			validations += fmt.Sprintf("\t\tfor item in &self.%[1]s { if let Err(e) = item.validate() { return Err(e); } }\n", fieldName)
+		} else {
+			validations += fmt.Sprintf("\t\tif let Err(e) = self.%s.validate() { return Err(e); }\n", fieldName)
+		}
+	}
 
-	fields := genRustFieldType(fieldType)
 	if plural {
-		fields = "Vec<" + fields + ">"
+		fieldType = "Vec<" + fieldType + ">"
 	}
 
 	rename := genRustFieldRename(name)
@@ -217,22 +235,34 @@ func genRustFieldCode(name string, fieldType string, plural bool, optional bool,
 		rename = "$value"
 	}
 
+	content := ""
 	if optional {
-		fields = "Option<" + fields + ">"
-		attributes += fmt.Sprintf("\t#[serde(rename = \"%s\", skip_serializing_if = \"Option::is_none\")]\n\tpub %s: %s,\n", rename, genRustFieldName(name), fields)
+		fieldType = "Option<" + fieldType + ">"
+		content += fmt.Sprintf("\t#[serde(rename = \"%s\", skip_serializing_if = \"Option::is_none\")]\n\tpub %s: %s,\n", rename, genRustFieldName(name), fieldType)
 	} else {
-		attributes += fmt.Sprintf("\t#[serde(rename = \"%s\")]\n\tpub %s: %s,\n", rename, genRustFieldName(name), fields)
+		content += fmt.Sprintf("\t#[serde(rename = \"%s\")]\n\tpub %s: %s,\n", rename, fieldName, fieldType)
 	}
 
-	return attributes
+	return content, validations
 }
 
-func genRustStructCode(name string, doc string, fieldContent string, untagged bool) string {
+func genRustStructCode(name string, doc string, fieldContent string, validations string, untagged bool) string {
 	extraTags := ""
 	if untagged {
 		extraTags += "\n#[serde(transparent)]"
 	}
-	return fmt.Sprintf("\n%s%s%s\npub struct %s {\n%s}\n", genFieldComment(name, doc, "//"), commonDerives, extraTags, name, fieldContent)
+
+	content := fmt.Sprintf("\n%s%s%s\npub struct %s {\n%s}\n", genFieldComment(name, doc, "//"), commonDerives, extraTags, name, fieldContent)
+	content += fmt.Sprintf("\nimpl %s {\n\tpub fn validate(&self) -> Result<(), ValidationError> {\n%s\t\tOk(())\n\t}\n}\n", name, validations)
+	return content
+}
+
+func genRustEnumCode(name string, doc string, fieldContent string) string {
+	content := fmt.Sprintf("\n%s%s\npub enum %s {\n\t#[default]\n", doc, commonDerives, name)
+	content += fieldContent
+	content += "}\n"
+	content += fmt.Sprintf("\nimpl %s {\n\tpub fn validate(&self) -> Result<(), ValidationError> {\n\t\tOk(())\n\t}\n}\n", name)
+	return content
 }
 
 // RustSimpleType generates code for simple type XML schema in Rust language
@@ -241,15 +271,15 @@ func (gen *CodeGenerator) RustSimpleType(v *SimpleType) {
 	if v.List {
 		if _, ok := gen.StructAST[v.Name]; !ok {
 			fieldType := getBasefromSimpleType(trimNSPrefix(v.Base), gen.ProtoTree)
-			content := genRustFieldCode(v.Name, fieldType, true, false, &v.Restriction, false)
+			content, validation := genRustFieldCode(v.Name, fieldType, true, false, &v.Restriction, false)
 			gen.StructAST[v.Name] = content
-			gen.Field += genRustStructCode(genRustStructName(v.Name, true), v.Doc, gen.StructAST[v.Name], false)
+			gen.Field += genRustStructCode(genRustStructName(v.Name, true), v.Doc, gen.StructAST[v.Name], validation, false)
 			return
 		}
 	}
 	if v.Union && len(v.MemberTypes) > 0 {
 		if _, ok := gen.StructAST[v.Name]; !ok {
-			var content string
+			var content, validation string
 			for _, member := range toSortedPairs(v.MemberTypes) {
 				memberName := member.key
 				memberType := member.value
@@ -257,59 +287,71 @@ func (gen *CodeGenerator) RustSimpleType(v *SimpleType) {
 				if memberType == "" { // fix order issue
 					memberType = getBasefromSimpleType(memberName, gen.ProtoTree)
 				}
-				content += genRustFieldCode(v.Name, memberType, false, false, &v.Restriction, false)
+				conts, valids := genRustFieldCode(v.Name, memberType, false, false, &v.Restriction, false)
+				content += conts
+				validation += valids
 			}
 			gen.StructAST[v.Name] = content
-			gen.Field += genRustStructCode(genRustStructName(v.Name, true), "", gen.StructAST[v.Name], false)
+			gen.Field += genRustStructCode(genRustStructName(v.Name, true), "", gen.StructAST[v.Name], validation, false)
 		}
 		return
 	}
 	if len(v.Restriction.Enum) > 0 && v.Base == "String" {
-		content := fmt.Sprintf("\n%s%s\npub enum %s {\n\t#[default]\n", genFieldComment(v.Name, v.Doc, "//"), commonDerives, genRustStructName(v.Name, true))
+		fieldContent := ""
 		for _, enumValue := range v.Restriction.Enum {
-			content += fmt.Sprintf("\t#[serde(rename = \"%s\")]\n\tCode%s,\n", enumValue, strings.ToUpper(enumValue))
+			fieldContent += fmt.Sprintf("\t#[serde(rename = \"%s\")]\n\tCode%s,\n", enumValue, strings.ToUpper(enumValue))
 		}
-		gen.StructAST[v.Name] = content
-		gen.Field += content + "}\n"
+		gen.StructAST[v.Name] = fieldContent
+		enumName := genRustStructName(v.Name, true)
+		gen.Field += genRustEnumCode(enumName, genFieldComment(v.Name, v.Doc, "//"), fieldContent)
 		return
 	}
 
 	if _, ok := gen.StructAST[v.Name]; !ok {
-		// fmt.Printf("SimpleType: %s, %s, %+v\n", v.Name, v.Base, v.Restriction.Enum)
 		fieldType := getBasefromSimpleType(trimNSPrefix(v.Base), gen.ProtoTree)
-		content := genRustFieldCode(v.Name, fieldType, false, false, &v.Restriction, true)
+		content, validation := genRustFieldCode(v.Name, fieldType, false, false, &v.Restriction, true)
 		gen.StructAST[v.Name] = content
-		gen.Field += genRustStructCode(genRustStructName(v.Name, true), v.Doc, gen.StructAST[v.Name], true)
+		gen.Field += genRustStructCode(genRustStructName(v.Name, true), v.Doc, gen.StructAST[v.Name], validation, true)
 	}
 }
 
 // RustComplexType generates code for complex type XML schema in Rust language
 // syntax.
 func (gen *CodeGenerator) RustComplexType(v *ComplexType) {
-	var content string
+	var content, validation string
 	for _, attrGroup := range v.AttributeGroup {
 		fieldType := getBasefromSimpleType(trimNSPrefix(attrGroup.Ref), gen.ProtoTree)
-		content += genRustFieldCode(attrGroup.Name, fieldType, false, false, nil, false)
+		conts, valids := genRustFieldCode(attrGroup.Name, fieldType, false, false, nil, false)
+		content += conts
+		validation += valids
 	}
 	for _, attribute := range v.Attributes {
 		// fieldType := getBasefromSimpleType(trimNSPrefix(attribute.Type), gen.ProtoTree)
 		fieldType := "String"
-		// fmt.Printf("SimpleType: %+v\n", attribute)
-		content += genRustFieldCode(attribute.Name, fieldType, attribute.Plural, attribute.Optional, nil, false)
+		conts, valids := genRustFieldCode(attribute.Name, fieldType, attribute.Plural, attribute.Optional, nil, false)
+		content += conts
+		validation += valids
 	}
 	for _, group := range v.Groups {
 		fieldType := getBasefromSimpleType(trimNSPrefix(group.Ref), gen.ProtoTree)
-		content += genRustFieldCode(group.Name, fieldType, group.Plural, false, nil, false)
+		conts, valids := genRustFieldCode(group.Name, fieldType, group.Plural, false, nil, false)
+		content += conts
+		validation += valids
 	}
 	for _, element := range v.Elements {
 		fieldType := getBasefromSimpleType(trimNSPrefix(element.Type), gen.ProtoTree)
-		content += genRustFieldCode(element.Name, fieldType, element.Plural, element.Optional, nil, false)
+		conts, valids := genRustFieldCode(element.Name, fieldType, element.Plural, element.Optional, nil, false)
+		content += conts
+		validation += valids
 	}
 	if len(v.Base) > 0 {
 		fieldType := getBasefromSimpleType(trimNSPrefix(v.Base), gen.ProtoTree)
 		if isRustBuiltInType(v.Base) {
-			content += genRustFieldCode("value", fieldType, false, false, nil, false)
+			conts, valids := genRustFieldCode("value", fieldType, false, false, nil, false)
+			content += conts
+			validation += valids
 		} else {
+			fmt.Printf("\n\n%s\n", fieldType)
 			fieldName := genRustFieldName(fieldType)
 			// If the type is not a built-in one, add the base type as a nested field tagged with flatten
 			content += fmt.Sprintf("\t#[serde(flatten)]\n\tpub %s: %s,\n", fieldName, fieldType)
@@ -318,7 +360,7 @@ func (gen *CodeGenerator) RustComplexType(v *ComplexType) {
 
 	if _, ok := gen.StructAST[v.Name]; !ok {
 		gen.StructAST[v.Name] = content
-		gen.Field += genRustStructCode(genRustStructName(v.Name, true), v.Doc, gen.StructAST[v.Name], false)
+		gen.Field += genRustStructCode(genRustStructName(v.Name, true), v.Doc, gen.StructAST[v.Name], validation, false)
 	} else {
 		fmt.Printf("%s\n", content)
 	}
@@ -332,17 +374,21 @@ func isRustBuiltInType(typeName string) bool {
 // RustGroup generates code for group XML schema in Rust language syntax.
 func (gen *CodeGenerator) RustGroup(v *Group) {
 	if _, ok := gen.StructAST[v.Name]; !ok {
-		var content string
+		var content, validation string
 		for _, element := range v.Elements {
 			fieldType := getBasefromSimpleType(trimNSPrefix(element.Type), gen.ProtoTree)
-			content += genRustFieldCode(element.Name, fieldType, element.Plural, element.Optional, &element.Restriction, false)
+			conts, valids := genRustFieldCode(element.Name, fieldType, element.Plural, element.Optional, &element.Restriction, false)
+			content += conts
+			validation += valids
 		}
 		for _, group := range v.Groups {
 			fieldType := getBasefromSimpleType(trimNSPrefix(group.Ref), gen.ProtoTree)
-			content += genRustFieldCode(group.Name, fieldType, group.Plural, false, nil, false)
+			conts, valids := genRustFieldCode(group.Name, fieldType, group.Plural, false, nil, false)
+			content += conts
+			validation += valids
 		}
 		gen.StructAST[v.Name] = content
-		gen.Field += genRustStructCode(genRustStructName(v.Name, true), v.Doc, gen.StructAST[v.Name], false)
+		gen.Field += genRustStructCode(genRustStructName(v.Name, true), v.Doc, gen.StructAST[v.Name], validation, false)
 	}
 }
 
@@ -350,13 +396,15 @@ func (gen *CodeGenerator) RustGroup(v *Group) {
 // syntax.
 func (gen *CodeGenerator) RustAttributeGroup(v *AttributeGroup) {
 	if _, ok := gen.StructAST[v.Name]; !ok {
-		var content string
+		var content, validation string
 		for _, attribute := range v.Attributes {
 			fieldType := getBasefromSimpleType(trimNSPrefix(attribute.Type), gen.ProtoTree)
-			content += genRustFieldCode(attribute.Name, fieldType, attribute.Plural, attribute.Optional, &attribute.Restriction, false)
+			conts, valids := genRustFieldCode(attribute.Name, fieldType, attribute.Plural, attribute.Optional, &attribute.Restriction, false)
+			content += conts
+			validation += valids
 		}
 		gen.StructAST[v.Name] = content
-		gen.Field += genRustStructCode(genRustStructName(v.Name, true), v.Doc, gen.StructAST[v.Name], false)
+		gen.Field += genRustStructCode(genRustStructName(v.Name, true), v.Doc, gen.StructAST[v.Name], validation, false)
 	}
 }
 
@@ -364,8 +412,9 @@ func (gen *CodeGenerator) RustAttributeGroup(v *AttributeGroup) {
 func (gen *CodeGenerator) RustElement(v *Element) {
 	if _, ok := gen.StructAST[v.Name]; !ok {
 		fieldType := getBasefromSimpleType(trimNSPrefix(v.Type), gen.ProtoTree)
-		gen.StructAST[v.Name] = genRustFieldCode(v.Name, fieldType, v.Plural, v.Optional, &v.Restriction, false)
-		gen.Field += genRustStructCode(genRustFieldName(v.Name), v.Doc, gen.StructAST[v.Name], false)
+		content, validation := genRustFieldCode(v.Name, fieldType, v.Plural, v.Optional, &v.Restriction, false)
+		gen.StructAST[v.Name] = content
+		gen.Field += genRustStructCode(genRustFieldName(v.Name), v.Doc, gen.StructAST[v.Name], validation, false)
 	}
 }
 
@@ -373,8 +422,9 @@ func (gen *CodeGenerator) RustElement(v *Element) {
 func (gen *CodeGenerator) RustAttribute(v *Attribute) {
 	if _, ok := gen.StructAST[v.Name]; !ok {
 		fieldType := getBasefromSimpleType(trimNSPrefix(v.Type), gen.ProtoTree)
-		gen.StructAST[v.Name] = genRustFieldCode(v.Name, fieldType, v.Plural, v.Optional, &v.Restriction, false)
-		gen.Field += genRustStructCode(genRustFieldName(v.Name), v.Doc, gen.StructAST[v.Name], false)
+		content, validation := genRustFieldCode(v.Name, fieldType, v.Plural, v.Optional, &v.Restriction, false)
+		gen.StructAST[v.Name] = content
+		gen.Field += genRustStructCode(genRustFieldName(v.Name), v.Doc, gen.StructAST[v.Name], validation, false)
 	}
 }
 
