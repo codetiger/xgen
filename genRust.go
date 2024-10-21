@@ -91,7 +91,7 @@ var (
 		"virtual":  true,
 		"yield":    true,
 	}
-	commonDerives = "#[cfg_attr(feature = \"derive_default\", derive(Default))]\n#[cfg_attr(feature = \"derive_serde\", derive(Serialize, Deserialize))]\n"
+	commonDerives = "#[cfg_attr(feature = \"derive_debug\", derive(Debug))]\n#[cfg_attr(feature = \"derive_default\", derive(Default))]\n#[cfg_attr(feature = \"derive_serde\", derive(Serialize, Deserialize))]\n"
 )
 
 // GenRust generate Go programming language source code for XML schema
@@ -115,8 +115,7 @@ use regex::Regex;
 use crate::common::*;
 #[cfg(feature = "derive_serde")]
 use serde::{Deserialize, Serialize};`
-	var extras = `#[cfg_attr(feature = "derive_debug", derive(Debug))]
-#[cfg_attr(feature = "derive_clone", derive(Clone))]
+	var extras = `#[cfg_attr(feature = "derive_clone", derive(Clone))]
 #[cfg_attr(feature = "derive_partial_eq", derive(PartialEq))]
 `
 	source := []byte(fmt.Sprintf("%s\n\n%spub mod %s {%s\n}", copyright, extras, gen.Package, strings.ReplaceAll(imports+gen.Field, "\n", "\n\t")))
