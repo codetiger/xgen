@@ -8,7 +8,9 @@
 
 package xgen
 
-import "regexp"
+import (
+	"regexp"
+)
 
 // SimpleType definitions provide for constraining character information item
 // [children] of element and attribute information items.
@@ -129,21 +131,12 @@ type AttributeGroup struct {
 // attributes. Restriction on XML elements are called facets.
 // https://www.w3.org/TR/xmlschema-1/structures.html#element-restriction
 type Restriction struct {
-	Doc                  string
-	Precision            int
-	Enum                 []string
-	Min, Max             float64
-	MinLength, MaxLength int
-	Pattern              *regexp.Regexp
-}
-
-func (r Restriction) IsEmpty() bool {
-	return r.MinLength == 0 &&
-		r.MaxLength == 0 &&
-		r.Pattern == nil &&
-		len(r.Enum) == 0 &&
-		r.Min == 0.0 &&
-		r.Max == 0.0 &&
-		r.Precision == 0
-	// Include checks for other fields as necessary
+	Doc                        string
+	Precision                  int
+	Enum                       []string
+	Min, Max                   float64
+	hasMin, hasMax             bool
+	MinLength, MaxLength       int
+	hasMinLength, hasMaxLength bool
+	Pattern                    *regexp.Regexp
 }

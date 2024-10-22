@@ -170,7 +170,7 @@ func getBasefromSimpleType(name string, XSDSchema []interface{}) string {
 	for _, ele := range XSDSchema {
 		switch v := ele.(type) {
 		case *SimpleType:
-			if !v.Restriction.IsEmpty() && v.Name == name {
+			if !(v.Restriction.Pattern == nil && len(v.Restriction.Enum) == 0 && !v.Restriction.hasMinLength && !v.Restriction.hasMaxLength) && v.Name == name {
 				return v.Name
 			} else if !v.List && !v.Union && v.Name == name {
 				return v.Base
@@ -186,6 +186,18 @@ func getBasefromSimpleType(name string, XSDSchema []interface{}) string {
 		}
 	}
 	return name
+}
+
+func getRefSimpleType(name string, XSDSchema []interface{}) *SimpleType {
+	for _, ele := range XSDSchema {
+		switch v := ele.(type) {
+		case *SimpleType:
+			if !v.List && !v.Union && v.Name == name {
+				return v
+			}
+		}
+	}
+	return nil
 }
 
 func getNSPrefix(str string) (ns string) {
@@ -283,7 +295,7 @@ func genFieldComment(name, doc, prefix string) string {
 	if doc == "" {
 		return fmt.Sprintf("\r\n%s %s ...\r\n", prefix, name)
 	}
-	return fmt.Sprintf("\r\n%s %s is %s\r\n", prefix, name, docReplacer.Replace(doc))
+	return fmt.Sprintf("\r\n%s %s: %s\r\n", prefix, name, docReplacer.Replace(doc))
 }
 
 type kvPair struct {
