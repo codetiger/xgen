@@ -188,6 +188,18 @@ func getBasefromSimpleType(name string, XSDSchema []interface{}) string {
 	return name
 }
 
+func getRefSimpleType(name string, XSDSchema []interface{}) *SimpleType {
+	for _, ele := range XSDSchema {
+		switch v := ele.(type) {
+		case *SimpleType:
+			if !v.List && !v.Union && v.Name == name {
+				return v
+			}
+		}
+	}
+	return nil
+}
+
 func getNSPrefix(str string) (ns string) {
 	split := strings.Split(str, ":")
 	if len(split) == 2 {
