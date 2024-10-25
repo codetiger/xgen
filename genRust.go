@@ -120,7 +120,7 @@ use regex::Regex;
 use crate::common::*;
 #[cfg(feature = "derive_serde")]
 use serde::{Deserialize, Serialize};`
-	source := []byte(fmt.Sprintf("%s\n\npub mod %s {%s\n}", copyright, gen.Package, strings.ReplaceAll(imports+gen.Field, "\n", "\n\t")))
+	source := []byte(fmt.Sprintf("%s\n\n%s", copyright, imports+gen.Field))
 	f.Write(source)
 	return err
 }
