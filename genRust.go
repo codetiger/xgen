@@ -120,7 +120,7 @@ use regex::Regex;
 use crate::common::*;
 #[cfg(feature = "derive_serde")]
 use serde::{Deserialize, Serialize};`
-	source := []byte(fmt.Sprintf("%s\n\npub mod %s {%s\n}", copyright, gen.Package, strings.ReplaceAll(imports+gen.Field, "\n", "\n\t")))
+	source := []byte(fmt.Sprintf("%s\n\n%s", copyright, imports+gen.Field))
 	f.Write(source)
 	return err
 }
@@ -220,7 +220,11 @@ func getValidationCode(variable string, fieldName string, fieldType string, rest
 	if restriction.Pattern != nil && fieldType == "String" {
 		patternStr := escapeRustString(restriction.Pattern.String())
 		validations += fmt.Sprintf("let pattern = Regex::new(\"%s\").unwrap();\n", patternStr)
-		validations += fmt.Sprintf("if !pattern.is_match(&%s) {\n", variable)
+		if variable == "val" {
+			validations += fmt.Sprintf("if !pattern.is_match(%s) {\n", variable)
+		} else {
+			validations += fmt.Sprintf("if !pattern.is_match(&%s) {\n", variable)
+		}
 		validations += fmt.Sprintf("\treturn Err(ValidationError::new(1005, \"%s does not match the required pattern\".to_string()));\n", fieldName)
 		validations += "}\n"
 	}
@@ -278,16 +282,16 @@ func genCustomTypeValidation(fieldName string, fieldType string, plural bool, op
 	if plural {
 		// Handle Option<Vec<T>> for custom types
 		if optional {
-			return fmt.Sprintf("if let Some(ref vec) = self.%[1]s { for item in vec { if let Err(e) = item.validate() { return Err(e); } } }\n", fieldName)
+			return fmt.Sprintf("if let Some(ref vec) = self.%[1]s { for item in vec { item.validate()? } }\n", fieldName)
 		}
 		// Handle Vec<T> for custom types
-		return fmt.Sprintf("for item in &self.%[1]s { if let Err(e) = item.validate() { return Err(e); } }\n", fieldName)
+		return fmt.Sprintf("for item in &self.%[1]s { item.validate()? }\n", fieldName)
 	} else {
 		// Handle Option<T> and T cases for custom types
 		if optional {
-			return fmt.Sprintf("if let Some(ref val) = self.%[1]s { if let Err(e) = val.validate() { return Err(e); } }\n", fieldName)
+			return fmt.Sprintf("if let Some(ref val) = self.%[1]s { val.validate()? }\n", fieldName)
 		}
-		return fmt.Sprintf("if let Err(e) = self.%s.validate() { return Err(e); }\n", fieldName)
+		return fmt.Sprintf("self.%s.validate()?;\n", fieldName)
 	}
 }
 
