@@ -96,6 +96,7 @@ var (
 #[cfg_attr(feature = "derive_serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "derive_clone", derive(Clone))]
 #[cfg_attr(feature = "derive_partial_eq", derive(PartialEq))]
+#[cfg_attr(feature = "derive_samplify", derive(Sampleable))]
 `
 )
 
@@ -121,7 +122,9 @@ use regex::Regex;
 use crate::common::*;
 use open_payments_common::ValidationError;
 #[cfg(feature = "derive_serde")]
-use serde::{Deserialize, Serialize};`
+use serde::{Deserialize, Serialize};
+#[cfg(feature = "derive_samplify")]
+use samplify_rs::Sampleable;`
 	source := []byte(fmt.Sprintf("%s\n\n%s", copyright, imports+gen.Field))
 	f.Write(source)
 	return err
